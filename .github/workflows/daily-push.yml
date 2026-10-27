@@ -1,0 +1,35 @@
+name: daily-safety-push
+
+on:
+  schedule:
+    # UTC 0:00 = 北京时间 8:00（GitHub 定时任务可能有 0~15 分钟延迟）
+    - cron: '0 0 * * *'
+  workflow_dispatch: {}   # 允许手动触发测试
+
+permissions:
+  contents: write
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run push script
+        env:
+          PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
+        run: python push_safety_video.py
+
+      - name: Commit pushed state
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add pushed.json
+          git diff --cached --quiet || (git commit -m "update pushed state [skip ci]" && git push)
