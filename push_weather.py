@@ -65,6 +65,12 @@ def build_plain_text(res, now_str):
     ]
     if daily["precipitation"][0]["max"] >= 0.5:
         lines.append("今天可能有降雨，记得带伞！")
+    h_temps = res.get("hourly", {}).get("temperature", [])[:8]
+    h_skys = res.get("hourly", {}).get("skycon", [])[:8]
+    hours_line = " ".join(f"{t['datetime'][11:13]}时{skycon_cn(s['value'])}{round(t['value'])}℃"
+                          for t, s in zip(h_temps, h_skys))
+    if hours_line:
+        lines.append(f"未来8小时：{hours_line}")
     for a in (res.get("alert") or {}).get("content", []):
         if a.get("title"):
             lines.append(f"⚠{a['title']}")
@@ -80,7 +86,7 @@ def fetch_weather():
     if not token or len(token) < 10:
         raise RuntimeError("CAIYUN_TOKEN 为空或太短，请检查 GitHub Secret 配置")
     url = f"{API_URL}/{token}/{LOCATION}/weather.json"
-    params = {"dailysteps": 2, "alert": "true"}
+    params = {"dailysteps": 2, "hourlysteps": 12, "alert": "true"}
     r = requests.get(url, params=params, timeout=15)
     log(f"彩云 API HTTP 状态码：{r.status_code}")
     body = r.text.strip()
@@ -120,6 +126,23 @@ def build_content(res, now_str):
     gap = d0["max"] - d0["min"]
     gap_tip = f"（昼夜温差{gap:.0f}℃，注意增减衣物）" if gap >= 10 else ""
 
+    # 未来 8 小时逐小时预报
+    hourly = res.get("hourly", {})
+    h_temps = hourly.get("temperature", [])[:8]
+    h_skys = hourly.get("skycon", [])[:8]
+    rows = []
+    plain_hours = []
+    for t, s in zip(h_temps, h_skys):
+        hh = t["datetime"][11:13]
+        rows.append(f"<tr><td>{hh}:00</td><td style='padding:0 10px'>{skycon_cn(s['value'])}</td>"
+                    f"<td style='padding:0 10px'>{round(t['value'])}℃</td></tr>")
+        plain_hours.append(f"{hh}时{skycon_cn(s['value'])}{round(t['value'])}℃")
+    hourly_html = ""
+    if rows:
+        hourly_html = ("<h4>⏰ 未来 8 小时</h4><table>"
+                       + "".join(rows) + "</table>")
+    hourly_plain = " ".join(plain_hours)
+
     tomorrow = daily["temperature"][1]
     t_sky = skycon_cn(daily["skycon"][1]["value"])
 
@@ -143,6 +166,7 @@ def build_content(res, now_str):
     <p>{rain_tip}</p>
     <p><b>空气质量：</b>{aqi_desc or '暂无数据'}</p>
     <p><b>紫外线：</b>{uv}　<b>穿衣：</b>{dress}</p>
+    {hourly_html}
     <p style='color:#888'>明日：{t_sky} {tomorrow['min']} ~ {tomorrow['max']}℃</p>
     """
 
