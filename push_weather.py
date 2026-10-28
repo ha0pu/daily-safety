@@ -5,6 +5,7 @@
 - Token 从环境变量 CAIYUN_TOKEN 读取（在 GitHub Secrets 里配置），不要写死在代码里
 """
 import html
+import json
 import os
 import time
 from datetime import datetime, timezone, timedelta
@@ -171,12 +172,52 @@ def build_content(res, now_str):
     """
 
 
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schedule_state.json")
+
+
+def load_schedule_state():
+    try:
+        with open(STATE_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {"date": "", "slots": []}
+
+
+def save_schedule_state(state):
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(state, f, ensure_ascii=False)
+
+
+def current_slot(now):
+    """北京时间落在 6 点或 11 点附近的运行才算有效，其余跳过。"""
+    if now.hour == 5 or now.hour == 6:
+        return "morning"
+    if now.hour == 10 or now.hour == 11:
+        return "noon"
+    return None
+
+
 def main():
     if not PUSHPLUS_TOKEN:
         raise RuntimeError("缺少环境变量 PUSHPLUS_TOKEN")
     if not CAIYUN_TOKEN:
         raise RuntimeError("缺少环境变量 CAIYUN_TOKEN")
-    now_str = datetime.now(timezone(timedelta(hours=8))).strftime("%m月%d日")
+
+    now = datetime.now(timezone(timedelta(hours=8)))
+    now_str = now.strftime("%m月%d日")
+    today = now.strftime("%Y-%m-%d")
+
+    # 手动触发(workflow_dispatch)不受时段限制；定时触发只在 6 点/11 点附近窗口内生效
+    if os.environ.get("GITHUB_EVENT_NAME") == "schedule":
+        slot = current_slot(now)
+        if slot is None:
+            log(f"当前北京时间 {now:%H:%M}，不在 6 点/11 点窗口内，跳过本次调度")
+            return
+        state = load_schedule_state()
+        if state.get("date") == today and slot in state.get("slots", []):
+            log(f"今天 {slot} 时段已推送过，跳过（GitHub 迟到的重复调度）")
+            return
+
     log("开始获取彩云天气数据")
     try:
         res = fetch_weather()
@@ -189,11 +230,21 @@ def main():
     title = f"{now_str}天气｜{CITY_NAME} {skycon_cn(res['daily']['skycon'][0]['value'])} {d0['min']}~{d0['max']}℃"
 
     # 通道1：微信公众号（富文本）
-    push(title, content)
+    ok1 = push(title, content)
 
     # 通道2：移动「新消息ClawBot」（纯文本；需先在 pushplus 绑定 cmcc 渠道，未绑定只会打日志不影响主推送）
-    push(f"{now_str}天气 {CITY_NAME}", build_plain_text(res, now_str),
-         template="txt", channel="cmcc")
+    ok2 = push(f"{now_str}天气 {CITY_NAME}", build_plain_text(res, now_str),
+               template="txt", channel="cmcc")
+
+    # 定时触发时记录本时段已完成（成功才记录，workflow 会把这个文件提交回仓库）
+    if os.environ.get("GITHUB_EVENT_NAME") == "schedule" and ok1:
+        state = load_schedule_state()
+        if state.get("date") != today:
+            state = {"date": today, "slots": []}
+        if slot not in state["slots"]:
+            state["slots"].append(slot)
+        save_schedule_state(state)
+        log(f"已记录今天 {slot} 时段推送完成")
 
     log("双通道推送完成")
 
