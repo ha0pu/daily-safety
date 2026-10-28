@@ -2,8 +2,10 @@ name: daily-weather-push
 
 on:
   schedule:
-    # UTC 22:00 = 北京时间次日 6:00（GitHub 定时任务可能有 0~15 分钟延迟）
+    # UTC 22:00 = 北京时间次日 6:00；UTC 3:00 = 北京时间 11:00
+    # GitHub 定时任务可能有 0~15 分钟延迟
     - cron: '0 22 * * *'
+    - cron: '0 3 * * *'
   workflow_dispatch: {}   # 允许手动触发测试
 
 permissions:
