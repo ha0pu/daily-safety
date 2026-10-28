@@ -34,22 +34,41 @@ def log(msg):
     print(f"[{datetime.now(timezone(timedelta(hours=8))).strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def push(title, content, template="html"):
+def push(title, content, template="html", channel="wechat"):
     payload = {"token": PUSHPLUS_TOKEN, "title": title, "content": content,
-               "template": template, "channel": "wechat"}
+               "template": template, "channel": channel}
     for attempt in range(3):
         try:
             r = requests.post(PUSHPLUS_URL, json=payload, timeout=10)
             data = r.json()
             if data.get("code") == 200:
-                log(f"已提交推送：{title}")
+                log(f"已提交推送[{channel}]：{title}")
                 return True
-            log(f"PushPlus 返回异常：{data}")
+            log(f"PushPlus 返回异常[{channel}]：{data}")
             return False
         except Exception as exc:
-            log(f"推送请求失败(第{attempt + 1}次)：{exc}")
+            log(f"推送请求失败(第{attempt + 1}次)[{channel}]：{exc}")
             time.sleep(3)
     return False
+
+
+def build_plain_text(res, now_str):
+    """给 cmcc（移动新消息，纯文本）用的正文。"""
+    rt, daily = res["realtime"], res["daily"]
+    d0 = daily["temperature"][0]
+    sky = skycon_cn(daily["skycon"][0]["value"])
+    lines = [
+        f"{now_str} {CITY_NAME}天气",
+        f"{sky} {d0['min']}~{d0['max']}℃ 当前{rt['temperature']}℃(体感{rt.get('apparent_temperature', rt['temperature'])}℃)",
+        f"空气：{rt.get('air_quality', {}).get('description', '暂无')}",
+        f"紫外线：{daily['life_index']['ultraviolet'][0]['desc']}｜穿衣：{daily['life_index']['dressing'][0]['desc']}",
+    ]
+    if daily["precipitation"][0]["max"] >= 0.5:
+        lines.append("今天可能有降雨，记得带伞！")
+    for a in (res.get("alert") or {}).get("content", []):
+        if a.get("title"):
+            lines.append(f"⚠{a['title']}")
+    return "\n".join(lines)
 
 
 def skycon_cn(code):
@@ -57,9 +76,17 @@ def skycon_cn(code):
 
 
 def fetch_weather():
-    url = f"{API_URL}/{CAIYUN_TOKEN}/{LOCATION}/weather.json"
+    token = CAIYUN_TOKEN.strip()   # 去掉复制时可能带上的空格/换行
+    if not token or not token.startswith("T"):
+        raise RuntimeError(f"彩云 Token 格式不对（应以 T 开头，当前开头是：{token[:3]!r}...），请检查 GitHub Secret CAIYUN_TOKEN")
+    url = f"{API_URL}/{token}/{LOCATION}/weather.json"
     params = {"dailysteps": 2, "alert": "true"}
     r = requests.get(url, params=params, timeout=15)
+    log(f"彩云 API HTTP 状态码：{r.status_code}")
+    body = r.text.strip()
+    if r.status_code != 200 or not body.startswith("{"):
+        # 把服务器实际返回的内容打出来，方便定位（Token 错/额度用完/接口地址错都能看出来）
+        raise RuntimeError(f"彩云 API 返回异常 HTTP {r.status_code}，返回内容：{body[:300]}")
     data = r.json()
     if data.get("status") != "ok":
         raise RuntimeError(f"彩云 API 返回异常：{data}")
@@ -136,8 +163,15 @@ def main():
     content = build_content(res, now_str)
     d0 = res["daily"]["temperature"][0]
     title = f"{now_str}天气｜{CITY_NAME} {skycon_cn(res['daily']['skycon'][0]['value'])} {d0['min']}~{d0['max']}℃"
+
+    # 通道1：微信公众号（富文本）
     push(title, content)
-    log("推送完成")
+
+    # 通道2：移动「新消息ClawBot」（纯文本；需先在 pushplus 绑定 cmcc 渠道，未绑定只会打日志不影响主推送）
+    push(f"{now_str}天气 {CITY_NAME}", build_plain_text(res, now_str),
+         template="txt", channel="cmcc")
+
+    log("双通道推送完成")
 
 
 if __name__ == "__main__":
