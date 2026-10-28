@@ -77,8 +77,8 @@ def skycon_cn(code):
 
 def fetch_weather():
     token = CAIYUN_TOKEN.strip()   # 去掉复制时可能带上的空格/换行
-    if not token or not token.startswith("T"):
-        raise RuntimeError(f"彩云 Token 格式不对（应以 T 开头，当前开头是：{token[:3]!r}...），请检查 GitHub Secret CAIYUN_TOKEN")
+    if not token or len(token) < 10:
+        raise RuntimeError("CAIYUN_TOKEN 为空或太短，请检查 GitHub Secret 配置")
     url = f"{API_URL}/{token}/{LOCATION}/weather.json"
     params = {"dailysteps": 2, "alert": "true"}
     r = requests.get(url, params=params, timeout=15)
