@@ -2,11 +2,17 @@ name: daily-weather-push
 
 on:
   schedule:
-    # UTC 22:00 = 北京时间次日 6:00；UTC 3:00 = 北京时间 11:00
-    # GitHub 定时任务可能有 0~15 分钟延迟
+    # 北京时间 6 点窗口：UTC 21:40 / 22:00 / 22:20 / 22:40（约 5:40~6:40 之间多次尝试）
+    - cron: '40 21 * * *'
     - cron: '0 22 * * *'
+    - cron: '20 22 * * *'
+    - cron: '40 22 * * *'
+    # 北京时间 11 点窗口：UTC 2:40 / 3:00 / 3:20 / 3:40（约 10:40~11:40 之间多次尝试）
+    - cron: '40 2 * * *'
     - cron: '0 3 * * *'
-  workflow_dispatch: {}   # 允许手动触发测试
+    - cron: '20 3 * * *'
+    - cron: '40 3 * * *'
+  workflow_dispatch: {}   # 允许手动触发测试（不受时间窗口限制）
 
 permissions:
   contents: write
@@ -28,4 +34,12 @@ jobs:
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
           CAIYUN_TOKEN: ${{ secrets.CAIYUN_TOKEN }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: python push_weather.py
+
+      - name: Commit schedule state
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add schedule_state.json
+          git diff --cached --quiet || (git commit -m "update schedule state [skip ci]" && git push)
