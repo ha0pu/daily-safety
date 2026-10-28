@@ -1,4 +1,4 @@
-name: daily-safety-push
+name: daily-weather-push
 
 on:
   schedule:
@@ -22,14 +22,8 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run push script
+      - name: Run weather push
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
-        run: python push_safety_video.py
-
-      - name: Commit pushed state
-        run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add pushed.json
-          git diff --cached --quiet || (git commit -m "update pushed state [skip ci]" && git push)
+          CAIYUN_TOKEN: ${{ secrets.CAIYUN_TOKEN }}
+        run: python push_weather.py
